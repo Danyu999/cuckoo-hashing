@@ -2,7 +2,6 @@
 #include <stdlib.h>
 #include <iostream>
 #include <functional>
-#include <chrono>
 #include <ctime>
 
 template <class T>
@@ -11,6 +10,7 @@ class CuckooSerialHashSet {
     // Wrapper class for entries to allow for nullptr to be the default
     struct Entry {
         T val;
+        Entry(T val) : val(val) {}
     };
 
     const int LIMIT;
@@ -19,6 +19,7 @@ class CuckooSerialHashSet {
     int capacity;
     std::vector<std::vector<Entry*>> table;
 
+    // Taken from boost hash_combine
     template <class D>
     inline void hash_combine(std::size_t& seed, const D& v) {
         std::hash<D> hasher;
@@ -51,6 +52,17 @@ class CuckooSerialHashSet {
             hash_combine(salt1, capacity);
         }
 
+        ~CuckooSerialHashSet() {
+            for (int i = 0; i < 2; i++) {
+                for (int j = 0; j < capacity; j++) {
+                    if (table[i][j] != nullptr) {
+                        delete table[i][j];
+                    }
+                }
+            }
+            table.clear();
+        }
+
         /**
          * Swaps the element at table[table_index][index] with val.
          * return: The old val
@@ -66,13 +78,10 @@ class CuckooSerialHashSet {
          * return: true if add was successful
          */
         bool add(T val) {
-            //std::cout << "add" << std::endl;
             if (contains(val)) {
                 return false;
             }
-            //std::cout << "add post contains" << std::endl;
-            Entry *value = new Entry(); //TODO: Cleanup these entries!
-            value->val = val;
+            Entry *value = new Entry(val);
             for (int i = 0; i < LIMIT; i++) {
                 if ((value = swap(0, hash0(value->val), value)) == nullptr) {
                     return true;
@@ -91,11 +100,11 @@ class CuckooSerialHashSet {
         bool remove(T val) {
             int index0 = hash0(val);
             int index1 = hash1(val);
-            if (table[0][index0].val == val) {
+            if (table[0][index0] != nullptr && table[0][index0]->val == val) {
                 delete table[0][index0];
                 table[0][index0] = nullptr;
                 return true;
-            } else if (table[1][index1]->val == val) {
+            } else if (table[1][index1] != nullptr && table[1][index1]->val == val) {
                 delete table[1][index1];
                 table[1][index1] = nullptr;
                 return true;
@@ -109,19 +118,43 @@ class CuckooSerialHashSet {
          */
         bool contains(T val) {
             //std::cout << "contains" << std::endl;
-            if (table[0][hash0(val)] != nullptr && table[0][hash0(val)]->val == val) {
+            int index0 = hash0(val);
+            int index1 = hash1(val);
+            if (table[0][index0] != nullptr && table[0][index0]->val == val) {
                 return true;
-            } else if (table[1][hash1(val)] != nullptr && table[1][hash1(val)]->val == val) {
+            } else if (table[1][index1] != nullptr && table[1][index1]->val == val) {
                 return true;
             }
             return false;
         }
 
         /**
-         * Resizes the table to be twice as big. Changes hash0 and hash1.
+         * Resizes the table to be twice as big. Changes salt0 and salt1.
          */
         void resize() {
+            std::cout << "resize" << std::endl;
+            // Get new salt values to change the hashes
+            hash_combine(salt0, time(NULL));
+            hash_combine(salt1, time(NULL));
 
+            capacity *= 2;
+            std::vector<std::vector<Entry*>> old_table(table);
+            table.clear();
+            for (int i = 0; i < 2; i++) {
+                std::vector<Entry*> row;
+                row.assign(capacity, nullptr);
+                table.push_back(row);
+            }
+
+            // Add the elements back into the bigger table
+            for (auto row : old_table) {
+                for (auto entry : row) {
+                    if (entry != nullptr) {
+                        add(entry->val); //TODO: what if this add call calls resize again? segfault
+                        delete entry;
+                    }
+                }
+            }
         }
 
         /**
@@ -142,8 +175,15 @@ class CuckooSerialHashSet {
 
         /**
          * Populates the table to some predetermined size
+         * return: true if successful
          */
-        void populate() {
-
+        bool populate(std::vector<T> entries) {
+            for (T entry : entries) {
+                if (!add(entry)) {
+                    std::cout << "Duplicate entry attempted for populate!" << std::endl;
+                    return false;
+                }
+            }
+            return true;
         }
 };

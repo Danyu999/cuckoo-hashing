@@ -5,7 +5,7 @@
 #include <ctime>
 
 template <class T>
-class CuckooConcurrentHashSet {
+class CuckooTransactionalHashSet {
 
     // Wrapper class for entries to allow for nullptr to be the default
     struct Entry {
@@ -40,7 +40,7 @@ class CuckooConcurrentHashSet {
     }
 
     public:
-        CuckooConcurrentHashSet(int capacity) : capacity(capacity), LIMIT(capacity/2) {
+        CuckooTransactionalHashSet(int capacity) : capacity(capacity), LIMIT(capacity/2) {
             for (int i = 0; i < 2; i++) {
                 std::vector<Entry*> row;
                 row.assign(capacity, nullptr);
@@ -51,7 +51,7 @@ class CuckooConcurrentHashSet {
             hash_combine(salt1, capacity);
         }
 
-        ~CuckooConcurrentHashSet() {
+        ~CuckooTransactionalHashSet() {
             for (int i = 0; i < 2; i++) {
                 for (int j = 0; j < capacity; j++) {
                     if (table[i][j] != nullptr) {
