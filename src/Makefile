@@ -12,10 +12,10 @@ CXXFLAGS = -MMD -ggdb -O3 -std=gnu++17 -m$(BITS)
 LDFLAGS	 = -m$(BITS) -lpthread -lrt
 
 # The basenames of the c++ files that this program uses
-CXXFILES = cuckoo-test cuckoo-serial
+CXXFILES = cuckoo-test
 
 # The executable we will build
-TARGET = $(ODIR)/cuckoo
+TARGET = $(ODIR)/cuckoo-test
 
 # Create the .o names from the CXXFILES
 OFILES = $(patsubst %, $(ODIR)/%.o, $(CXXFILES))
