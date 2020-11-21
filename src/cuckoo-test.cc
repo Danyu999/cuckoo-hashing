@@ -7,11 +7,11 @@
 #include <assert.h>
 
 #include "cuckoo-serial.h"
-#include "cuckoo-concurrent.h"
-#include "cuckoo-transactional.h"
+//#include "cuckoo-concurrent.h"
+//#include "cuckoo-transactional.h"
 
-const int NUM_OPS = 100000;
-const int CAPACITY = 100;
+const int NUM_OPS = 1000000;
+const int CAPACITY = 1000;
 const int KEY_MAX = 10000;
 
 struct Operation {
@@ -58,27 +58,20 @@ std::vector<Operation> generate_operations(int num_ops, std::vector<int> entries
     std::uniform_int_distribution<int> distribution_percentage(0, 100);
     std::uniform_int_distribution<int> distribution_entries(0, KEY_MAX);
     std::vector<Operation> ops;
-    // std::unordered_set<int> existing_entries(entries.begin(), entries.end());
     for (int i = 0; i < num_ops; i++) {
-        std::uniform_int_distribution<int> distribution_existing_entries(0, entries.size());
+        std::uniform_int_distribution<int> distribution_existing_entries(0, entries.size()-1);
         int which_op = distribution_percentage(generator);
         if (which_op <= 50) {
             // contains
             ops.emplace_back(distribution_entries(generator), 0);
         } else if (which_op <= 75) {
             // add
-            // // Guarantees 100% hit for add
-            // int entry = distribution_entries(generator);
-            // while (!existing_entries.insert(entry).second) {
-            //     entry = distribution_entries(generator);
-            // }
-            // entries.push_back(entry);
-            ops.emplace_back(distribution_entries(generator), 1);
+            int entry = distribution_entries(generator);
+            entries.push_back(entry);
+            ops.emplace_back(entry, 1);
         } else {
             // remove
-            // Guarantees higher percentage hit for remove
-            // ops.emplace_back(entries[distribution_existing_entries(generator)], 2);
-            ops.emplace_back(distribution_entries(generator), 2);
+            ops.emplace_back(entries[distribution_existing_entries(generator)], 2);
         }
     }
     return ops;
@@ -135,7 +128,7 @@ void do_work_transactional() {
 }
 
 int main(int argc, char *argv[]) {
-    auto entries = generate_entries(CAPACITY);
+    auto entries = generate_entries(CAPACITY/3);
 
     // Serial Cuckoo
     CuckooSerialHashSet<int> *cuckoo_serial = new CuckooSerialHashSet<int>(CAPACITY);
@@ -146,7 +139,7 @@ int main(int argc, char *argv[]) {
     auto ops = generate_operations(NUM_OPS, entries);
     std::cout << "Starting serial cuckoo..." << std::endl;
     do_work_serial(cuckoo_serial, ops, serial_metrics);
-    int expected_size = CAPACITY + serial_metrics.add_hit - serial_metrics.remove_hit;
+    int expected_size = CAPACITY/3 + serial_metrics.add_hit - serial_metrics.remove_hit;
     assert(expected_size == cuckoo_serial->size());
     std::cout << "Serial time (milliseconds):\t\t" << (double) serial_metrics.exec_time / 1000000.0 << std::endl;
     std::cout << std::fixed << "Serial average throughput (ops/sec):\t" << (double) NUM_OPS / ((double) serial_metrics.exec_time / 1000000000.0) << std::endl;
@@ -159,10 +152,10 @@ int main(int argc, char *argv[]) {
     delete cuckoo_serial;
 
     // Concurrent Cuckoo
-    CuckooConcurrentHashSet<int> *cuckoo_concurrent = new CuckooConcurrentHashSet<int>(CAPACITY);
+    //CuckooConcurrentHashSet<int> *cuckoo_concurrent = new CuckooConcurrentHashSet<int>(CAPACITY);
 
     // Transactional Cuckoo
-    CuckooTransactionalHashSet<int> *cuckoo_transactional = new CuckooTransactionalHashSet<int>(CAPACITY);
+    //CuckooTransactionalHashSet<int> *cuckoo_transactional = new CuckooTransactionalHashSet<int>(CAPACITY);
 
 
     // int capacity = 15;

@@ -13,7 +13,7 @@ class CuckooSerialHashSet {
         Entry(T val) : val(val) {}
     };
 
-    const int LIMIT;
+    int limit;
     size_t salt0;
     size_t salt1;
     int capacity;
@@ -40,8 +40,38 @@ class CuckooSerialHashSet {
         return seed % capacity;
     }
 
+    /**
+     * Resizes the table to be twice as big. Changes salt0 and salt1.
+     */
+    void resize() {
+        std::cout << "resize" << std::endl;
+        // Get new salt values to change the hashes
+        hash_combine(salt0, time(NULL));
+        hash_combine(salt1, time(NULL));
+
+        capacity *= 2;
+        limit *= 2;
+        std::vector<std::vector<Entry*>> old_table(table);
+        table.clear();
+        for (int i = 0; i < 2; i++) {
+            std::vector<Entry*> row;
+            row.assign(capacity, nullptr);
+            table.push_back(row);
+        }
+
+        // Add the elements back into the bigger table
+        for (auto row : old_table) {
+            for (auto entry : row) {
+                if (entry != nullptr) {
+                    add(entry->val); //TODO: what if this add call calls resize again? segfault
+                    delete entry;
+                }
+            }
+        }
+    }
+
     public:
-        CuckooSerialHashSet(int capacity) : capacity(capacity), LIMIT(capacity/2) {
+        CuckooSerialHashSet(int capacity) : capacity(capacity), limit(capacity/2) {
             for (int i = 0; i < 2; i++) {
                 std::vector<Entry*> row;
                 row.assign(capacity, nullptr);
@@ -53,12 +83,13 @@ class CuckooSerialHashSet {
         }
 
         ~CuckooSerialHashSet() {
-            for (int i = 0; i < 2; i++) {
-                for (int j = 0; j < capacity; j++) {
-                    if (table[i][j] != nullptr) {
-                        delete table[i][j];
+            for (auto row : table) {
+                for (auto entry : row) {
+                    if (entry != nullptr) {
+                        delete entry;
                     }
                 }
+                row.clear();
             }
             table.clear();
         }
@@ -82,7 +113,7 @@ class CuckooSerialHashSet {
                 return false;
             }
             Entry *value = new Entry(val);
-            for (int i = 0; i < LIMIT; i++) {
+            for (int i = 0; i < limit; i++) {
                 if ((value = swap(0, hash0(value->val), value)) == nullptr) {
                     return true;
                 } else if ((value = swap(1, hash1(value->val), value)) == nullptr) {
@@ -129,43 +160,14 @@ class CuckooSerialHashSet {
         }
 
         /**
-         * Resizes the table to be twice as big. Changes salt0 and salt1.
-         */
-        void resize() {
-            std::cout << "resize" << std::endl;
-            // Get new salt values to change the hashes
-            hash_combine(salt0, time(NULL));
-            hash_combine(salt1, time(NULL));
-
-            capacity *= 2;
-            std::vector<std::vector<Entry*>> old_table(table);
-            table.clear();
-            for (int i = 0; i < 2; i++) {
-                std::vector<Entry*> row;
-                row.assign(capacity, nullptr);
-                table.push_back(row);
-            }
-
-            // Add the elements back into the bigger table
-            for (auto row : old_table) {
-                for (auto entry : row) {
-                    if (entry != nullptr) {
-                        add(entry->val); //TODO: what if this add call calls resize again? segfault
-                        delete entry;
-                    }
-                }
-            }
-        }
-
-        /**
          * Counts the number of elements in the table
          * return: The number of elements in the table
          */
         int size() {
             int size = 0;
-            for (int i = 0; i < 2; i++) {
-                for (int j = 0; j < capacity; j++) {
-                    if (table[i][j] != nullptr) {
+            for (auto row : table) {
+                for (auto entry : row) {
+                    if (entry != nullptr) {
                         size++;
                     }
                 }
