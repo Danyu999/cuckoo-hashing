@@ -15,6 +15,7 @@ class CuckooConcurrentHashSet {
     size_t salt1;
     int capacity;
     std::vector<std::vector<std::list<T>>> table;
+    // Note: locks cannot be resized
     std::vector<std::vector<std::recursive_mutex>> locks;
 
     template <class T>
