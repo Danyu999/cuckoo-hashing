@@ -9,7 +9,7 @@ class CuckooTransactionalHashSet {
 
     // Wrapper class for entries to allow for nullptr to be the default
     struct Entry {
-        T val;
+        const T val;
         Entry(T val) : val(val) {}
     };
 
@@ -17,6 +17,7 @@ class CuckooTransactionalHashSet {
     size_t salt0;
     size_t salt1;
     int capacity;
+    bool resizing = false;
     std::vector<std::vector<Entry*>> table;
 
     // Taken from boost hash_combine
@@ -26,14 +27,14 @@ class CuckooTransactionalHashSet {
         seed ^= hasher(v) + 0x9e3779b9 + (seed<<6) + (seed>>2);
     }
 
-    int hash0(T val) {
+    int hash0(const T val) {
         size_t seed = 0;
         hash_combine(seed, val);
         hash_combine(seed, salt0);
         return seed % capacity;
     }
 
-    int hash1(T val) {
+    int hash1(const T val) {
         size_t seed = 0;
         hash_combine(seed, val);
         hash_combine(seed, salt1);
@@ -43,31 +44,72 @@ class CuckooTransactionalHashSet {
     /**
      * Resizes the table to be twice as big. Changes salt0 and salt1.
      */
-    void resize() {
-        std::cout << "resize" << std::endl;
-        // Get new salt values to change the hashes
-        hash_combine(salt0, time(NULL));
-        hash_combine(salt1, time(NULL));
-
-        capacity *= 2;
-        limit *= 2;
-        std::vector<std::vector<Entry*>> old_table(table);
-        table.clear();
-        for (int i = 0; i < 2; i++) {
-            std::vector<Entry*> row;
-            row.assign(capacity, nullptr);
-            table.push_back(row);
+    bool resize() {
+        if (resizing) {
+            return false;
         }
+        resizing = true;
+        bool done;
+        std::vector<std::vector<Entry*>> old_table;
+        do {
+            done = true;
+            // Get new salt values to change the hashes
+            hash_combine(salt0, time(NULL));
+            hash_combine(salt1, time(NULL));
 
-        // Add the elements back into the bigger table
+            capacity *= 2;
+            limit *= 2;
+            old_table = table;
+            table.clear();
+            for (int i = 0; i < 2; i++) {
+                std::vector<Entry*> row;
+                row.assign(capacity, nullptr);
+                table.push_back(row);
+            }
+
+            // Add the elements back into the bigger table
+            [&] {
+                for (auto row : old_table) {
+                    for (auto entry : row) {
+                        if (entry != nullptr && !add(entry->val)) {
+                            done = false;
+                            table = old_table;
+                            return;
+                        }
+                    }
+                }
+            }();
+        } while (!done);
         for (auto row : old_table) {
             for (auto entry : row) {
-                if (entry != nullptr) {
-                    add(entry->val); //TODO: what if this add call calls resize again? segfault
+                if (entry != nullptr)
                     delete entry;
-                }
+            }
+            row.clear();
+        }
+        old_table.clear();
+        resizing = false;
+        return true;
+    }
+
+    /** 
+     * Adds val
+     * return: true if add was successful
+     */
+    bool add(const Entry *value) {
+        if (contains(value->val)) {
+            return false;
+        }
+        for (int i = 0; i < limit; i++) {
+            if ((value = swap(0, hash0(value->val), value)) == nullptr) {
+                return true;
+            } else if ((value = swap(1, hash1(value->val), value)) == nullptr) {
+                return true;
             }
         }
+        if (!resize())
+            return false;
+        add(value->val);
     }
 
     public:
@@ -98,7 +140,7 @@ class CuckooTransactionalHashSet {
          * Swaps the element at table[table_index][index] with val.
          * return: The old val
          */
-        Entry* swap(int table_index, int index, Entry *val) {
+        Entry* swap(const int table_index, const int index, Entry *val) {
             Entry *swap_val = table[table_index][index];
             table[table_index][index] = val;
             return swap_val;
@@ -108,7 +150,7 @@ class CuckooTransactionalHashSet {
          * Adds val
          * return: true if add was successful
          */
-        bool add(T val) {
+        bool add(const T val) {
             if (contains(val)) {
                 return false;
             }
@@ -120,7 +162,8 @@ class CuckooTransactionalHashSet {
                     return true;
                 }
             }
-            resize();
+            if (!resize())
+                return false;
             add(value->val);
         }
 
@@ -128,7 +171,7 @@ class CuckooTransactionalHashSet {
          * Removes val
          * return: true if remove was successful
          */
-        bool remove(T val) {
+        bool remove(const T val) {
             int index0 = hash0(val);
             int index1 = hash1(val);
             if (table[0][index0] != nullptr && table[0][index0]->val == val) {
@@ -147,8 +190,7 @@ class CuckooTransactionalHashSet {
          * Checks if the table contains val
          * return: true if the table contains val
          */
-        bool contains(T val) {
-            //std::cout << "contains" << std::endl;
+        bool contains(const T val) {
             int index0 = hash0(val);
             int index1 = hash1(val);
             if (table[0][index0] != nullptr && table[0][index0]->val == val) {
@@ -179,7 +221,7 @@ class CuckooTransactionalHashSet {
          * Populates the table to some predetermined size
          * return: true if successful
          */
-        bool populate(std::vector<T> entries) {
+        bool populate(const std::vector<T> entries) {
             for (T entry : entries) {
                 if (!add(entry)) {
                     std::cout << "Duplicate entry attempted for populate!" << std::endl;

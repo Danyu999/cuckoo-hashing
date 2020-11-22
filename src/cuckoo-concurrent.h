@@ -25,14 +25,14 @@ class CuckooConcurrentHashSet {
         seed ^= hasher(v) + 0x9e3779b9 + (seed<<6) + (seed>>2);
     }
 
-    int hash0(T val) {
+    int hash0(const T val) {
         size_t seed = 0;
         hash_combine(seed, val);
         hash_combine(seed, salt0);
         return abs((int) seed);
     }
 
-    int hash1(T val) {
+    int hash1(const T val) {
         size_t seed = 0;
         hash_combine(seed, val);
         hash_combine(seed, salt1);
@@ -78,12 +78,12 @@ class CuckooConcurrentHashSet {
         return false;
     }
 
-    void acquire(T val) {
+    void acquire(const T val) {
         locks[0][hash0(val) % locks[0].size()]->lock();
         locks[1][hash1(val) % locks[1].size()]->lock();
     }
 
-    void release(T val) {
+    void release(const T val) {
         locks[0][hash0(val) % locks[0].size()]->unlock();
         locks[1][hash1(val) % locks[1].size()]->unlock();
     }
@@ -140,7 +140,7 @@ class CuckooConcurrentHashSet {
      * Checks if the table contains val
      * return: true if the table contains val
      */
-    bool present(T val) {
+    bool present(const T val) {
         std::list<T> set0 = table[0][hash0(val) % capacity];
         if (std::find(set0.begin(), set0.end(), val) != set0.end()) {
             return true;
@@ -185,7 +185,7 @@ class CuckooConcurrentHashSet {
          * Adds val
          * return: true if add was successful
          */
-        bool add(T val) {
+        bool add(const T val) {
             acquire(val);
             int h0 = hash0(val) % capacity;
             int h1 = hash1(val) % capacity;
@@ -230,7 +230,7 @@ class CuckooConcurrentHashSet {
          * Removes val
          * return: true if remove was successful
          */
-        bool remove(T val) {
+        bool remove(const T val) {
             acquire(val);
             int h0 = hash0(val) % capacity;
             auto it0 = std::find(table[0][h0].begin(), table[0][h0].end(), val);
@@ -255,7 +255,7 @@ class CuckooConcurrentHashSet {
          * Checks if the table contains val
          * return: true if the table contains val
          */
-        bool contains(T val) {
+        bool contains(const T val) {
             acquire(val);
             std::list<T> set0 = table[0][hash0(val) % capacity];
             if (std::find(set0.begin(), set0.end(), val) != set0.cend()) {
@@ -291,7 +291,7 @@ class CuckooConcurrentHashSet {
          * Thread non-safe!
          * return: true if successful
          */
-        bool populate(std::vector<T> entries) {
+        bool populate(const std::vector<T> entries) {
             for (T entry : entries) {
                 if (!add(entry)) {
                     std::cout << "Duplicate entry attempted for populate!" << std::endl;
