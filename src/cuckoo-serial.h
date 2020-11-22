@@ -17,6 +17,7 @@ class CuckooSerialHashSet {
     size_t salt0;
     size_t salt1;
     int capacity;
+    bool resizing = false;
     std::vector<std::vector<Entry*>> table;
 
     // Taken from boost hash_combine
@@ -43,31 +44,72 @@ class CuckooSerialHashSet {
     /**
      * Resizes the table to be twice as big. Changes salt0 and salt1.
      */
-    void resize() {
-        std::cout << "resize" << std::endl;
-        // Get new salt values to change the hashes
-        hash_combine(salt0, time(NULL));
-        hash_combine(salt1, time(NULL));
-
-        capacity *= 2;
-        limit *= 2;
-        std::vector<std::vector<Entry*>> old_table(table);
-        table.clear();
-        for (int i = 0; i < 2; i++) {
-            std::vector<Entry*> row;
-            row.assign(capacity, nullptr);
-            table.push_back(row);
+    bool resize() {
+        if (resizing) {
+            return false;
         }
+        resizing = true;
+        bool done;
+        std::vector<std::vector<Entry*>> old_table;
+        do {
+            done = true;
+            // Get new salt values to change the hashes
+            hash_combine(salt0, time(NULL));
+            hash_combine(salt1, time(NULL));
 
-        // Add the elements back into the bigger table
+            capacity *= 2;
+            limit *= 2;
+            old_table = table;
+            table.clear();
+            for (int i = 0; i < 2; i++) {
+                std::vector<Entry*> row;
+                row.assign(capacity, nullptr);
+                table.push_back(row);
+            }
+
+            // Add the elements back into the bigger table
+            [&] {
+                for (auto row : old_table) {
+                    for (auto entry : row) {
+                        if (entry != nullptr && !add(entry->val)) {
+                            done = false;
+                            table = old_table;
+                            return;
+                        }
+                    }
+                }
+            }();
+        } while (!done);
         for (auto row : old_table) {
             for (auto entry : row) {
-                if (entry != nullptr) {
-                    add(entry->val); //TODO: what if this add call calls resize again? segfault
+                if (entry != nullptr)
                     delete entry;
-                }
+            }
+            row.clear();
+        }
+        old_table.clear();
+        resizing = false;
+        return true;
+    }
+
+    /** 
+     * Adds val
+     * return: true if add was successful
+     */
+    bool add(Entry *value) {
+        if (contains(value->val)) {
+            return false;
+        }
+        for (int i = 0; i < limit; i++) {
+            if ((value = swap(0, hash0(value->val), value)) == nullptr) {
+                return true;
+            } else if ((value = swap(1, hash1(value->val), value)) == nullptr) {
+                return true;
             }
         }
+        if (!resize())
+            return false;
+        add(value->val);
     }
 
     public:
@@ -120,7 +162,8 @@ class CuckooSerialHashSet {
                     return true;
                 }
             }
-            resize();
+            if (!resize())
+                return false;
             add(value->val);
         }
 

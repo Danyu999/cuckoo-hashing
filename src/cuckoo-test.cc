@@ -5,15 +5,18 @@
 #include <chrono>
 #include <random>
 #include <assert.h>
+#include <mutex>
+#include <thread>
 
 #include "cuckoo-serial.h"
 #include "cuckoo-concurrent.h"
 #include "cuckoo-transactional.h"
 
-const int NUM_OPS = 1000000;
-const int CAPACITY = 1000;
+const int NUM_OPS = 10000000;
+const int CAPACITY = 20000;
+const int INITIAL_SIZE = CAPACITY/2;
 const int KEY_MAX = 10000;
-const int NUM_THREADS = 1;
+const int NUM_THREADS = 8;
 
 struct Operation {
     int val;
@@ -72,7 +75,7 @@ std::vector<Operation> generate_operations(int num_ops, std::vector<int> *entrie
             ops.emplace_back(entry, 1);
         } else {
             // remove
-            ops.emplace_back(entries[distribution_existing_entries(generator)], 2);
+            ops.emplace_back(entries->at(distribution_existing_entries(generator)), 2);
         }
     }
     return ops;
@@ -117,12 +120,13 @@ void do_work_serial(CuckooSerialHashSet<int> *cuckoo_serial, std::vector<Operati
 /**
  * Runs a workload for cuckoo concurrent
  */
-void do_work_concurrent(CuckooConcurrentHashSet<int> *cuckoo_concurrent, std::vector<Operation> ops, std::vector<Metrics> *concurrent_metrics) {
+void do_work_concurrent(CuckooConcurrentHashSet<int> *cuckoo_concurrent, std::vector<int> concurrent_entries, std::vector<Metrics> *concurrent_metrics) {
     Metrics metrics = {};
+    auto ops = generate_operations(NUM_OPS, &concurrent_entries);
     // Start doing work
     long long exec_time_start = std::chrono::high_resolution_clock::now().time_since_epoch().count();
     for (auto op : ops) {
-        // std::cout << "val: " << op.val << ", type: " << op.type << std::endl;
+        //std::cout << "val: " << op.val << ", type: " << op.type << std::endl;
         switch (op.type) {
             // Contains
             case 0:
@@ -168,15 +172,15 @@ int main(int argc, char *argv[]) {
     CuckooSerialHashSet<int> *cuckoo_serial = new CuckooSerialHashSet<int>(CAPACITY);
     // Setup hash table and pre-generate workload
     Metrics serial_metrics = {};
-    auto serial_entries = generate_entries(CAPACITY/3);
+    auto serial_entries = generate_entries(INITIAL_SIZE);
     if (!cuckoo_serial->populate(serial_entries))
         return 0;
-    auto serial_ops = generate_operations(NUM_OPS, &serial_entries);
+    auto serial_ops = generate_operations(NUM_OPS * NUM_THREADS, &serial_entries);
     do_work_serial(cuckoo_serial, serial_ops, serial_metrics);
-    int expected_size = CAPACITY/3 + serial_metrics.add_hit - serial_metrics.remove_hit;
-    assert(expected_size == cuckoo_serial->size());
+    int serial_expected_size = INITIAL_SIZE + serial_metrics.add_hit - serial_metrics.remove_hit;
+    assert(serial_expected_size == cuckoo_serial->size());
     std::cout << "Serial time (milliseconds):\t\t" << (double) serial_metrics.exec_time / 1000000.0 << std::endl;
-    std::cout << std::fixed << "Serial average throughput (ops/sec):\t" << (double) NUM_OPS / ((double) serial_metrics.exec_time / 1000000000.0) << std::endl;
+    std::cout << std::fixed << "Serial average throughput (ops/sec):\t" << (double) (NUM_OPS * NUM_THREADS) / ((double) serial_metrics.exec_time / 1000000000.0) << std::endl;
     std::cout << "Serial contains hit: " << serial_metrics.contains_hit << std::endl;
     std::cout << "Serial contains miss: " << serial_metrics.contains_miss << std::endl;
     std::cout << "Serial add hit: " << serial_metrics.add_hit << std::endl;
@@ -188,23 +192,19 @@ int main(int argc, char *argv[]) {
     // Concurrent Cuckoo
     std::cout << "Starting concurrent cuckoo..." << std::endl;
     CuckooConcurrentHashSet<int> *cuckoo_concurrent = new CuckooConcurrentHashSet<int>(CAPACITY);
-    auto concurrent_entries = generate_entries(CAPACITY/3);
+    auto concurrent_entries = generate_entries(INITIAL_SIZE);
     if (!cuckoo_concurrent->populate(concurrent_entries))
         return 0;
-    std::vector<std::vector<Operation>> concurrent_ops = std::vector<std::vector<Operation>>();
-    concurrent_ops.reserve(NUM_THREADS);
     std::vector<std::thread> concurrent_threads = std::vector<std::thread>();
 	concurrent_threads.reserve(NUM_THREADS);
     std::vector<Metrics> concurrent_metrics = std::vector<Metrics>();
     concurrent_metrics.reserve(NUM_THREADS);
-    for (int thread = 0; thread < NUM_THREADS; thread++)
-        concurrent_ops.emplace_back(generate_operations(NUM_OPS, &concurrent_entries));
-    for (int thread = 0; thread < NUM_THREADS; thread++)
-        concurrent_threads.push_back(std::thread([&](){do_work_concurrent(cuckoo_concurrent, concurrent_ops[thread], &concurrent_metrics);}));
-    for (int thread = 0; thread < NUM_THREADS; thread++)
+    for (int thread = 0; thread < NUM_THREADS; thread++) {
+        concurrent_threads.push_back(std::thread([&](){do_work_concurrent(cuckoo_concurrent, concurrent_entries, &concurrent_metrics);}));
+    }
+    for (int thread = 0; thread < NUM_THREADS; thread++) {
         concurrent_threads[thread].join();
-    int expected_size = CAPACITY/3 + serial_metrics.add_hit - serial_metrics.remove_hit;
-    assert(expected_size == cuckoo_serial->size());
+    }
     Metrics total_concurrent_metrics = {};
     if (concurrent_metrics.size() != NUM_THREADS)
         std::cerr << "Concurrent metrics is incorrect size: " << concurrent_metrics.size() << std::endl;
@@ -225,6 +225,8 @@ int main(int argc, char *argv[]) {
         total_concurrent_metrics.remove_hit += concurrent_metrics[thread].remove_hit;
         total_concurrent_metrics.remove_miss += concurrent_metrics[thread].remove_miss;
     }
+    int concurrent_expected_size = INITIAL_SIZE + total_concurrent_metrics.add_hit - total_concurrent_metrics.remove_hit;
+    assert(concurrent_expected_size == cuckoo_concurrent->size());
     std::cout << "Average concurrent exec_time (milliseconds):\t\t" << total_concurrent_metrics.exec_time << std::endl;
     std::cout << std::fixed << "Average concurrent total throughput (ops/sec):\t\t" << (double) (NUM_OPS * NUM_THREADS) / (total_concurrent_metrics.exec_time / 1000.0) << std::endl;
     std::cout << "Concurrent total contains hit: " << total_concurrent_metrics.contains_hit << std::endl;
